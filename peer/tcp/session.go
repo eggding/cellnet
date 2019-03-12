@@ -6,6 +6,8 @@ import (
 	"github.com/davyxu/cellnet/util"
 	"net"
 	"sync"
+	"sync/atomic"
+	"time"
 )
 
 // Socket会话
@@ -23,11 +25,13 @@ type tcpSession struct {
 	exitSync sync.WaitGroup
 
 	// 发送队列
-	sendQueue *util.Pipe
+	sendQueue *cellnet.Pipe
 
 	cleanupGuard sync.Mutex
 
 	endNotify func()
+
+	closing int64
 }
 
 func (self *tcpSession) Peer() cellnet.Peer {
@@ -36,15 +40,24 @@ func (self *tcpSession) Peer() cellnet.Peer {
 
 // 取原始连接
 func (self *tcpSession) Raw() interface{} {
-	if self.conn == nil {
-		return nil
-	}
-
 	return self.conn
 }
 
 func (self *tcpSession) Close() {
-	self.sendQueue.Add(nil)
+
+	closing := atomic.SwapInt64(&self.closing, 1)
+	if closing != 0 {
+		return
+	}
+
+	if self.conn != nil {
+		// 关闭读
+		con := self.conn.(*net.TCPConn)
+		// 关闭读
+		con.CloseRead()
+		// 手动读超时
+		con.SetReadDeadline(time.Now())
+	}
 }
 
 // 发送封包
@@ -55,31 +68,76 @@ func (self *tcpSession) Send(msg interface{}) {
 		return
 	}
 
+	// 已经关闭，不再发送
+	if self.IsManualClosed() {
+		return
+	}
+
 	self.sendQueue.Add(msg)
+}
+
+func (self *tcpSession) IsManualClosed() bool {
+	return atomic.LoadInt64(&self.closing) != 0
+}
+
+func (self *tcpSession) protectedReadMessage() (msg interface{}, err error) {
+
+	defer func() {
+
+		if err := recover(); err != nil {
+			log.Errorf("IO panic: %s", err)
+			self.conn.Close()
+		}
+
+	}()
+
+	msg, err = self.ReadMessage(self)
+
+	return
 }
 
 // 接收循环
 func (self *tcpSession) recvLoop() {
 
+	var capturePanic bool
+
+	if i, ok := self.Peer().(cellnet.PeerCaptureIOPanic); ok {
+		capturePanic = i.CaptureIOPanic()
+	}
+
 	for self.conn != nil {
 
-		msg, err := self.ReadMessage(self)
+		var msg interface{}
+		var err error
+
+		if capturePanic {
+			msg, err = self.protectedReadMessage()
+		} else {
+			msg, err = self.ReadMessage(self)
+		}
 
 		if err != nil {
 			if !util.IsEOFOrNetReadError(err) {
 				log.Errorf("session closed, sesid: %d, err: %s", self.ID(), err)
 			}
 
-			self.Close()
+			self.sendQueue.Add(nil)
 
-			self.PostEvent(&cellnet.RecvMsgEvent{self, &cellnet.SessionClosed{}})
+			// 标记为手动关闭原因
+			closedMsg := &cellnet.SessionClosed{}
+			if self.IsManualClosed() {
+				closedMsg.Reason = cellnet.CloseReason_Manual
+			}
+
+			self.ProcEvent(&cellnet.RecvMsgEvent{Ses: self, Msg: closedMsg})
 			break
 		}
 
-		self.PostEvent(&cellnet.RecvMsgEvent{self, msg})
+		self.ProcEvent(&cellnet.RecvMsgEvent{Ses: self, Msg: msg})
 	}
 
-	self.cleanup()
+	// 通知完成
+	self.exitSync.Done()
 }
 
 // 发送循环
@@ -94,8 +152,7 @@ func (self *tcpSession) sendLoop() {
 		// 遍历要发送的数据
 		for _, msg := range writeList {
 
-			// TODO SendMsgEvent并不是很有意义
-			self.SendMessage(&cellnet.SendMsgEvent{self, msg})
+			self.SendMessage(&cellnet.SendMsgEvent{Ses: self, Msg: msg})
 		}
 
 		if exit {
@@ -103,21 +160,8 @@ func (self *tcpSession) sendLoop() {
 		}
 	}
 
-	self.cleanup()
-}
-
-// 清理资源
-func (self *tcpSession) cleanup() {
-
-	self.cleanupGuard.Lock()
-
-	defer self.cleanupGuard.Unlock()
-
-	// 关闭连接
-	if self.conn != nil {
-		self.conn.Close()
-		self.conn = nil
-	}
+	// 完整关闭
+	self.conn.Close()
 
 	// 通知完成
 	self.exitSync.Done()
@@ -126,14 +170,16 @@ func (self *tcpSession) cleanup() {
 // 启动会话的各种资源
 func (self *tcpSession) Start() {
 
+	atomic.StoreInt64(&self.closing, 0)
+
 	// connector复用session时，上一次发送队列未释放可能造成问题
 	self.sendQueue.Reset()
 
-	// 将会话添加到管理器
-	self.Peer().(peer.SessionManager).Add(self)
-
 	// 需要接收和发送线程同时完成时才算真正的完成
 	self.exitSync.Add(2)
+
+	// 将会话添加到管理器, 在线程处理前添加到管理器(分配id), 避免ID还未分配,就开始使用id的竞态问题
+	self.Peer().(peer.SessionManager).Add(self)
 
 	go func() {
 
@@ -160,7 +206,7 @@ func newSession(conn net.Conn, p cellnet.Peer, endNotify func()) *tcpSession {
 	self := &tcpSession{
 		conn:       conn,
 		endNotify:  endNotify,
-		sendQueue:  util.NewPipe(),
+		sendQueue:  cellnet.NewPipe(),
 		pInterface: p,
 		CoreProcBundle: p.(interface {
 			GetBundle() *peer.CoreProcBundle

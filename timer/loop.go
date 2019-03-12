@@ -2,30 +2,43 @@ package timer
 
 import (
 	"github.com/davyxu/cellnet"
+	"sync/atomic"
 	"time"
 )
 
+// 轻量级的持续Tick循环
 type Loop struct {
 	Context      interface{}
 	Duration     time.Duration
 	userCallback func(*Loop)
 
-	running bool
+	running int64
 
 	Queue cellnet.EventQueue
 }
 
 func (self *Loop) Running() bool {
-	return self.running
+	return atomic.LoadInt64(&self.running) != 0
 }
 
+func (self *Loop) setRunning(v bool) {
+
+	if v {
+		atomic.StoreInt64(&self.running, 1)
+	} else {
+		atomic.StoreInt64(&self.running, 0)
+	}
+
+}
+
+// 开始Tick
 func (self *Loop) Start() bool {
 
-	if self.running {
+	if self.Running() {
 		return false
 	}
 
-	self.running = true
+	atomic.StoreInt64(&self.running, 1)
 
 	self.rawPost()
 
@@ -38,7 +51,7 @@ func (self *Loop) rawPost() {
 		panic("seconds can be zero in loop")
 	}
 
-	if self.running {
+	if self.Running() {
 		After(self.Queue, self.Duration, func() {
 
 			tick(self, false)
@@ -55,9 +68,10 @@ func (self *Loop) NextLoop() {
 
 func (self *Loop) Stop() {
 
-	self.running = false
+	self.setRunning(false)
 }
 
+// 马上调用一次用户回调
 func (self *Loop) Notify() *Loop {
 	self.userCallback(self)
 	return self
@@ -67,7 +81,7 @@ func tick(ctx interface{}, nextLoop bool) {
 
 	loop := ctx.(*Loop)
 
-	if !nextLoop && loop.running {
+	if !nextLoop && loop.Running() {
 
 		// 即便在Notify中发生了崩溃，也会使用defer再次继续循环
 		defer loop.rawPost()
@@ -76,6 +90,8 @@ func tick(ctx interface{}, nextLoop bool) {
 	loop.Notify()
 }
 
+// 执行一个循环, 持续调用callback, 周期是duration
+// context: 将context上下文传递到带有context指针的函数回调中
 func NewLoop(q cellnet.EventQueue, duration time.Duration, callback func(*Loop), context interface{}) *Loop {
 
 	self := &Loop{

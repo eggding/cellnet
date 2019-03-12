@@ -22,7 +22,7 @@ type wsSession struct {
 	exitSync sync.WaitGroup
 
 	// 发送队列
-	sendQueue *util.Pipe
+	sendQueue *cellnet.Pipe
 
 	cleanupGuard sync.Mutex
 
@@ -63,11 +63,11 @@ func (self *wsSession) recvLoop() {
 				log.Errorln("session closed:", err)
 			}
 
-			self.PostEvent(&cellnet.RecvMsgEvent{self, &cellnet.SessionClosed{}})
+			self.ProcEvent(&cellnet.RecvMsgEvent{Ses: self, Msg: &cellnet.SessionClosed{}})
 			break
 		}
 
-		self.PostEvent(&cellnet.RecvMsgEvent{self, msg})
+		self.ProcEvent(&cellnet.RecvMsgEvent{Ses: self, Msg: msg})
 	}
 
 	self.cleanup()
@@ -86,7 +86,7 @@ func (self *wsSession) sendLoop() {
 		for _, msg := range writeList {
 
 			// TODO SendMsgEvent并不是很有意义
-			self.SendMessage(&cellnet.SendMsgEvent{self, msg})
+			self.SendMessage(&cellnet.SendMsgEvent{Ses: self, Msg: msg})
 		}
 
 		if exit {
@@ -109,6 +109,9 @@ func (self *wsSession) cleanup() {
 		self.conn.Close()
 		self.conn = nil
 	}
+
+	// pal301x: websocket 客服端关闭服务端无法释放 issue 60
+	self.Close()
 
 	// 通知完成
 	self.exitSync.Done()
@@ -148,7 +151,7 @@ func newSession(conn *websocket.Conn, p cellnet.Peer, endNotify func()) *wsSessi
 	self := &wsSession{
 		conn:       conn,
 		endNotify:  endNotify,
-		sendQueue:  util.NewPipe(),
+		sendQueue:  cellnet.NewPipe(),
 		pInterface: p,
 		CoreProcBundle: p.(interface {
 			GetBundle() *peer.CoreProcBundle

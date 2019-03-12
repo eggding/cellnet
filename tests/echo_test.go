@@ -4,12 +4,13 @@ import (
 	"fmt"
 	"github.com/davyxu/cellnet"
 	"github.com/davyxu/cellnet/peer"
+	_ "github.com/davyxu/cellnet/peer/gorillaws"
 	_ "github.com/davyxu/cellnet/peer/tcp"
 	_ "github.com/davyxu/cellnet/peer/udp"
 	"github.com/davyxu/cellnet/proc"
+	_ "github.com/davyxu/cellnet/proc/gorillaws"
 	_ "github.com/davyxu/cellnet/proc/tcp"
 	_ "github.com/davyxu/cellnet/proc/udp"
-	"github.com/davyxu/cellnet/util"
 	"testing"
 	"time"
 )
@@ -18,7 +19,7 @@ type echoContext struct {
 	Address   string
 	Protocol  string
 	Processor string
-	Tester    *util.SignalTester
+	Tester    *SignalTester
 	Acceptor  cellnet.GenericPeer
 }
 
@@ -34,13 +35,19 @@ var (
 			Protocol:  "udp",
 			Processor: "udp.ltv",
 		},
+
+		{
+			Address:   "127.0.0.1:7703",
+			Protocol:  "gorillaws",
+			Processor: "gorillaws.ltv",
+		},
 	}
 )
 
 func echo_StartServer(context *echoContext) {
 	queue := cellnet.NewEventQueue()
 
-	context.Acceptor = peer.NewGenericPeer(context.Protocol+".Acceptor", "server", context.Address, queue)
+	context.Acceptor = peer.NewGenericPeer(context.Protocol+".Acceptor", context.Protocol+"server", context.Address, queue)
 
 	proc.BindProcessorHandler(context.Acceptor, context.Processor, func(ev cellnet.Event) {
 
@@ -70,7 +77,7 @@ func echo_StartServer(context *echoContext) {
 func echo_StartClient(echoContext *echoContext) {
 	queue := cellnet.NewEventQueue()
 
-	p := peer.NewGenericPeer(echoContext.Protocol+".Connector", "client", echoContext.Address, queue)
+	p := peer.NewGenericPeer(echoContext.Protocol+".Connector", echoContext.Protocol+"client", echoContext.Address, queue)
 
 	proc.BindProcessorHandler(p, echoContext.Processor, func(ev cellnet.Event) {
 
@@ -103,7 +110,7 @@ func runEcho(t *testing.T, index int) {
 
 	ctx := echoContexts[index]
 
-	ctx.Tester = util.NewSignalTester(t)
+	ctx.Tester = NewSignalTester(t)
 	ctx.Tester.SetTimeout(time.Hour)
 
 	echo_StartServer(ctx)
@@ -121,4 +128,9 @@ func TestEchoTCP(t *testing.T) {
 func TestEchoUDP(t *testing.T) {
 
 	runEcho(t, 1)
+}
+
+func TestEchoWS(t *testing.T) {
+
+	runEcho(t, 2)
 }

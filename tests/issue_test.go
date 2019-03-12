@@ -1,68 +1,35 @@
 package tests
 
 import (
-	"encoding/binary"
 	"github.com/davyxu/cellnet"
 	"github.com/davyxu/cellnet/peer"
-	"github.com/davyxu/cellnet/proc"
-	"github.com/davyxu/cellnet/util"
-	"net"
+	"sync"
 	"testing"
 )
 
-func TestInterface(t *testing.T) {
+func TestContextSet(t *testing.T) {
 
 	p := peer.NewPeer("tcp.Acceptor").(cellnet.TCPAcceptor)
-	t.Log(p != nil)
+	p.(cellnet.ContextSet).SetContext("sd", nil)
+
+	if v, ok := p.(cellnet.ContextSet).GetContext("sd"); ok && v == nil {
+
+	} else {
+		t.FailNow()
+	}
+
+	var connMap = new(sync.Map)
+	if p.(cellnet.ContextSet).FetchContext("sd", &connMap) && connMap == nil {
+
+	} else {
+		t.FailNow()
+	}
 }
 
-const maxPacketAddress = "127.0.0.1:16811"
+func TestAutoAllocPort(t *testing.T) {
 
-func TestCrackSizePacket(t *testing.T) {
-	queue := cellnet.NewEventQueue()
+	p := peer.NewGenericPeer("tcp.Acceptor", "autoacc", ":0", nil)
+	p.Start()
 
-	peerIns := peer.NewGenericPeer("tcp.Acceptor", "server", maxPacketAddress, queue)
-
-	// 设置最大封包约束，默认不约束
-	peerIns.(cellnet.TCPSocketOption).SetMaxPacketSize(1000)
-
-	proc.BindProcessorHandler(peerIns, "tcp.ltv", nil)
-
-	peerIns.Start()
-
-	queue.StartLoop()
-
-	conn, err := net.Dial("tcp", maxPacketAddress)
-
-	if err != nil {
-		t.Error(err)
-		t.FailNow()
-	}
-
-	payload := []byte("hello")
-
-	payloadSize := len(payload)
-
-	fakePayloadSize := payloadSize - 1
-
-	pkt := make([]byte, 2+2+fakePayloadSize)
-
-	// Length, 构建很大的封包
-	binary.LittleEndian.PutUint16(pkt, 60000)
-
-	// Type
-	binary.LittleEndian.PutUint16(pkt[2:], uint16(1))
-
-	// Value
-	copy(pkt[2+2:], payload)
-
-	util.WriteFull(conn, pkt)
-
-	var endBuffer []byte
-	_, err = conn.Read(endBuffer)
-	if !util.IsEOFOrNetReadError(err) {
-
-		t.Error(err)
-		t.FailNow()
-	}
+	t.Log("auto alloc port:", p.(cellnet.TCPAcceptor).Port())
 }

@@ -6,13 +6,15 @@ cd ${CURRDIR}
 
 set -e
 
-go test -v .
+go test -race -v .
 
 # 编译例子
+trap 'rm -rf examplebin' EXIT
 mkdir -p examplebin
 go build -p 4 -v -o ./examplebin/echo github.com/davyxu/cellnet/examples/echo
 go build -p 4 -v -o ./examplebin/echo github.com/davyxu/cellnet/examples/chat/client
 go build -p 4 -v -o ./examplebin/echo github.com/davyxu/cellnet/examples/chat/server
 go build -p 4 -v -o ./examplebin/echo github.com/davyxu/cellnet/examples/fileserver
 go build -p 4 -v -o ./examplebin/echo github.com/davyxu/cellnet/examples/websocket
-rm -rf examplebin
+
+

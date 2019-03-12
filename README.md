@@ -42,9 +42,9 @@ cellnet经过多个版本的迭代，无论是作为初学者学习的范例，�
 
     纯UDP裸包收发
 
-- HTTP
+- HTTP(测试中)
 
-    侦听器的优雅重启, 支持json及form的收发及封装。编写游戏服务器时，不再需要配合第三方HTTP服务器做后台。
+    侦听器的优雅重启, 支持json及form的收发及封装。编写游戏服务器时，不再需要使用第三方HTTP服务器对接SDK。
 
 - WebSocket
 
@@ -62,17 +62,21 @@ cellnet经过多个版本的迭代，无论是作为初学者学习的范例，�
 
        内存流直接序列化, 适用于服务器内网传输
 
+    - ProtoPlus(https://github.com/davyxu/protoplus)
+
+       增加并优化过的Protobuf的编码格式
+
     可以通过codec包自行添加新的编码格式
 
 * 支持混合编码收发
 
     无需改动代码，只需调整消息注册方式，即可达成运行期同时收发不同编码的封包
 
-    - 与Unity3D+Lua使用sproto通信
-
     - 与其他语言编写的服务器使用protobuf
 
     - 与web服务器使用json通信
+    
+    - 与Unity3D(C#)使用ProtoPlus(github.com/davyxu/protoplus)协议通信
 
     优点：
 
@@ -111,6 +115,8 @@ cellnet经过多个版本的迭代，无论是作为初学者学习的范例，�
   go get -v github.com/davyxu/golog
 
   go get -v github.com/davyxu/goobjfmt
+
+  go get -v github.com/davyxu/protoplus
 ```
 
 # 第三方库
@@ -282,15 +288,28 @@ sid1 say: hello
 
 若cellnet内建的Peer, Codec及Processor流程不能满足你的需求，可以阅读下面链接内容，添加并扩展cellnet功能
 
-* [定制Codec](https://github.com/davyxu/cellnet/blob/master/doc/customcodec.md)
+* [定制封包编码(Codec)](https://github.com/davyxu/cellnet/blob/master/doc/customcodec.md)
 
-* [定制Peer](https://github.com/davyxu/cellnet/blob/master/doc/custompeer.md)
+    封包编码可以是JSON，Protobuf等
 
-* [定制Processor](https://github.com/davyxu/cellnet/blob/master/doc/customproc.md)
+* [定制端(Peer)](https://github.com/davyxu/cellnet/blob/master/doc/custompeer.md)
+
+    新增Redis连接器，与cellnet自带的TCP/UDP的Peer都不同。
+
+* [定制处理器(Processor)](https://github.com/davyxu/cellnet/blob/master/doc/customproc.md)
+
+    需要在收发包时有统一的处理行为
 
 # FAQ
 
 [常见问题及回答](https://github.com/davyxu/cellnet/blob/master/doc/faq.md)
+
+这里应该有你想知道的答案
+
+# 基于cellnet的游戏服务器框架
+
+cellmesh
+https://github.com/davyxu/cellmesh
 
 
 # 贡献者

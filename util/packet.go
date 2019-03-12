@@ -9,14 +9,21 @@ import (
 )
 
 var (
-	ErrMaxPacket = errors.New("Invalid packet size")
+	ErrMaxPacket  = errors.New("packet over size")
+	ErrMinPacket  = errors.New("packet short size")
+	ErrShortMsgID = errors.New("short msgid")
+)
+
+const (
+	bodySize  = 2 // 包体大小字段
+	msgIDSize = 2 // 消息ID字段
 )
 
 // 接收Length-Type-Value格式的封包流程
 func RecvLTVPacket(reader io.Reader, maxPacketSize int) (msg interface{}, err error) {
 
 	// Size为uint16，占2字节
-	var sizeBuffer = make([]byte, 2)
+	var sizeBuffer = make([]byte, bodySize)
 
 	// 持续读取Size直到读到为止
 	_, err = io.ReadFull(reader, sizeBuffer)
@@ -24,6 +31,10 @@ func RecvLTVPacket(reader io.Reader, maxPacketSize int) (msg interface{}, err er
 	// 发生错误时返回
 	if err != nil {
 		return
+	}
+
+	if len(sizeBuffer) < bodySize {
+		return nil, ErrMinPacket
 	}
 
 	// 用小端格式读取Size
@@ -44,9 +55,13 @@ func RecvLTVPacket(reader io.Reader, maxPacketSize int) (msg interface{}, err er
 		return
 	}
 
+	if len(body) < msgIDSize {
+		return nil, ErrShortMsgID
+	}
+
 	msgid := binary.LittleEndian.Uint16(body)
 
-	msgData := body[2:]
+	msgData := body[msgIDSize:]
 
 	// 将字节数组和消息ID用户解出消息
 	msg, _, err = codec.DecodeMessage(int(msgid), msgData)
@@ -61,11 +76,11 @@ func RecvLTVPacket(reader io.Reader, maxPacketSize int) (msg interface{}, err er
 // 发送Length-Type-Value格式的封包流程
 func SendLTVPacket(writer io.Writer, ctx cellnet.ContextSet, data interface{}) error {
 
-	// 取Socket连接
-	var msgData []byte
-	var msgID int
-
-	var meta *cellnet.MessageMeta
+	var (
+		msgData []byte
+		msgID   int
+		meta    *cellnet.MessageMeta
+	)
 
 	switch m := data.(type) {
 	case *cellnet.RawPacket: // 发裸包
@@ -84,16 +99,16 @@ func SendLTVPacket(writer io.Writer, ctx cellnet.ContextSet, data interface{}) e
 		msgID = meta.ID
 	}
 
-	pkt := make([]byte, 2+2+len(msgData))
+	pkt := make([]byte, bodySize+msgIDSize+len(msgData))
 
 	// Length
-	binary.LittleEndian.PutUint16(pkt, uint16(2+len(msgData)))
+	binary.LittleEndian.PutUint16(pkt, uint16(msgIDSize+len(msgData)))
 
 	// Type
-	binary.LittleEndian.PutUint16(pkt[2:], uint16(msgID))
+	binary.LittleEndian.PutUint16(pkt[bodySize:], uint16(msgID))
 
 	// Value
-	copy(pkt[2+2:], msgData)
+	copy(pkt[bodySize+msgIDSize:], msgData)
 
 	// 将数据写入Socket
 	err := WriteFull(writer, pkt)
